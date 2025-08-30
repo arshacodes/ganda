@@ -189,7 +189,7 @@ onMounted(() => {
         <ul class="space-y-3">
             <li class="flex items-center justify-between">
                 <div>
-                    <h4 class="font-medium text-gray-800">Calculus Homework #3</h4>
+                    <h4 class="font-medium text-gray-800">Calculus asdfadsa Homework #3</h4>
                     <p class="text-sm text-gray-500">Due Aug 5, 2025</p>
                 </div>
                 <button
