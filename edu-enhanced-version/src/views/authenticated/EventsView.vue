@@ -1,169 +1,243 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { auth, db } from '@/config/firebaseConfig'
-import { createUserWithEmailAndPassword, onAuthStateChanged } from 'firebase/auth'
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore'
+import { db, auth } from '@/config/firebaseConfig'
+import { 
+    collection, 
+    addDoc, 
+    getDocs, 
+    query, 
+    orderBy, 
+    serverTimestamp, 
+    doc, 
+    getDoc 
+} from 'firebase/firestore'
 import { toast } from 'vue3-toastify'
+import { onAuthStateChanged } from 'firebase/auth'
+import EventCard from '@/components/ui/events/EventCard.vue'
 
-const title = ref('')
-const description = ref('')
-const location = ref('')
-const date = ref('')
-const time = ref('')
+const currentUser = ref(null)
+const userDetails = ref(null)
+
+onMounted(() => {
+  onAuthStateChanged(auth, async (user) => {
+    if (user) {
+      currentUser.value = user
+
+      const docRef = doc(db, 'users', user.uid)
+      const docSnap = await getDoc(docRef)
+      if (docSnap.exists()) {
+        userDetails.value = docSnap.data()
+      }
+    } else {
+      currentUser.value = null
+      userDetails.value = null
+    }
+  })
+})
+
+const eventTitle = ref('')
+const eventDesc = ref('')
+const eventLocation = ref('')
+const eventDate = ref('')
+const eventStartTime = ref('')
+const eventEndTime = ref('')
+
 const isSubmitting = ref(false)
-
 const isAddEventShown = ref(false)
 
+const events = ref([])
+const loading = ref(true)
+
 const toggleCreateEvent = () => {
-    isAddEventShown.value = !isAddEventShown.value
-    console.log(isAddEventShown.value)
+  isAddEventShown.value = !isAddEventShown.value
 }
 
-const addEvent = async () => {
-    try {
-        // Save extra fields to firestore
-        await setDoc(doc(db, 'events'), {
-            title: title.value,
-            description: description.value,
-            location: location.value,
-            time: time.value,
-            createdAt: serverTimestamp(),
-        })
-
-        toast.success('Event created successfully')
-    } catch (err) {
-        console.log(err.message)
-        toast.error('Failed to create event, please try again')
-    } finally {
-        isSubmitting.value = false
-    }
+const fetchEvents = async () => {
+  try {
+    const q = query(collection(db, 'events'), orderBy('createdAt', 'desc'))
+    const snapshot = await getDocs(q)
+    events.value = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+  } catch (err) {
+    toast.error('Failed to load events')
+    console.error(err)
+  } finally {
+    loading.value = false
+  }
 }
+
+const createEvent = async () => {
+  if (!eventTitle.value || !eventDesc.value || !eventLocation.value || !eventDate.value || !eventStartTime.value || !eventEndTime.value) {
+    toast.error('Please fill in all required fields')
+    return
+  }
+
+  if (!currentUser.value) {
+    toast.error('You must be logged in to create an event')
+    return
+  }
+
+  const today = new Date()
+  today.setHours(0, 0, 0, 0) // normalize (ignore time part)
+
+  const selectedDate = new Date(eventDate.value)
+  if (selectedDate < today) {
+    toast.error('Event date cannot be in the past')
+    return
+  }
+
+  isSubmitting.value = true
+
+  try {
+    await addDoc(collection(db, 'events'), {
+      title: eventTitle.value,
+      description: eventDesc.value,
+      location: eventLocation.value,
+      date: eventDate.value,
+      startTime: eventStartTime.value,
+      endTime: eventEndTime.value,
+      createdAt: serverTimestamp(),
+      uid: currentUser.value.uid,
+
+      user: {
+            email: currentUser.value.email,
+            firstName: userDetails.value?.firstName ?? '',
+            lastName: userDetails.value?.lastName ?? '',
+            displayName: userDetails.value?.displayName ?? currentUser.value.displayName ?? '',
+            photoUrl: userDetails.value?.photoUrl ?? currentUser.value.photoURL ?? '',
+        },
+    })
+
+    toast.success('Event created successfully')
+    isAddEventShown.value = false
+
+    eventTitle.value = ''
+    eventDesc.value = ''
+    eventLocation.value = ''
+    eventDate.value = ''
+    eventStartTime.value = ''
+    eventEndTime.value = ''
+
+    await fetchEvents()
+  } catch (err) {
+    toast.error('Failed to create event, please try again')
+    console.error(err)
+  } finally {
+    isSubmitting.value = false
+  }
+}
+
+onMounted(() => {
+  fetchEvents()
+})
 </script>
+
+
 <template>
-    <div class="flex flex-row justify-between">
-        <h1 class="text-2xl font-bold mb-4">Explore Events</h1>
-        <button @click="toggleCreateEvent" class="bg-indigo-600 text-white px-3 py-1 rounded-md text-sm hover:bg-indigo-700">Add Event</button>
+  <div class="p-6">
+    <!-- Header with add event button -->
+    <div class="flex justify-between items-center mb-6">
+      <h1 class="text-2xl font-bold">Explore Events</h1>
+      <button
+        @click="toggleCreateEvent"
+        class="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700"
+      >
+        Add Event
+      </button>
     </div>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        <!-- Community card template repeated for multiple communities -->
-        <div class="bg-white rounded-lg shadow p-5 flex flex-col">
-            <div class="flex items-center space-x-3 mb-3">
-                <span
-                    class="w-10 h-10 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center font-semibold"
-                    >CS</span
-                >
-                <div>
-                    <h3 class="font-semibold text-gray-800">Computer Science Society</h3>
-                    <p class="text-xs text-gray-500">1.2K members</p>
-                </div>
-            </div>
-            <p class="text-sm text-gray-600 flex-1">
-                A community for computer science enthusiasts to discuss coding, algorithms, and
-                emerging technologies. Share resources, ask questions, and collaborate on projects.
-            </p>
-            <div class="mt-4 flex justify-between items-center">
-                <a href="#" class="text-indigo-600 hover:underline text-sm">View</a>
-                <button
-                    class="bg-indigo-600 text-white px-3 py-1 rounded-md text-sm hover:bg-indigo-700"
-                >
-                    Join
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <div class="w-full mx-auto space-y-4">
-        <EventCard v-for="(event, index) in events" :key="index" :event="event" />
-
-        <!-- Loader -->
-        <div v-if="loading" class="text-center py-4">
-            <span>Loading...</span>
-        </div>
-
-        <!-- Trigger for infinite scroll -->
-        <div ref="loadMoreTrigger" class="h-2"></div>
+    <div class="space-y-6 w-full">
+      <div v-if="loading" class="col-span-full text-center">Loading events...</div>
+      <EventCard v-for="event in events" :key="event.id" :post="event" @deleted="events = events.filter(e => e.id !== $event)" @edit="openEditModal"/>
     </div>
 
     <div
-        class="fixed inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm z-51"
-        :class="{ hidden: !isAddEventShown }"
+        v-if="isAddEventShown"
+        class="fixed inset-0 flex items-center justify-center bg-black/40 backdrop-blur-sm z-50"
     >
-        <div class="bg-white rounded-2xl shadow-lg w-full max-w-md p-6 relative">
-            <!-- Close Button -->
-            <button
-                @click="isAddEventShown = false"
-                class="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
-            >
+
+      <div class="bg-white rounded-lg shadow-lg max-w-md w-full p-6 relative">
+            <button @click="isAddEventShown = false" class="absolute top-4 right-4 text-gray-500 hover:text-gray-800" aria-label="Close modal">
                 ✕
             </button>
 
-            <!-- Modal Header -->
-            <h2 class="text-xl font-semibold mb-4">Event Details</h2>
+        <h2 class="text-xl font-semibold mb-4">Create New Event</h2>
 
-            <!-- Modal Form -->
-            <form action="#" class="space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700">Title</label>
-                    <input
-                        v-model="title"
-                        type="text"
-                        class="w-full mt-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                    />
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700">Description</label>
-                    <textarea
-                        v-model="description"
-                        type="text"
-                        class="w-full mt-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                    ></textarea>
-                </div>
-                <div>
-                    <h2 class="text-lg font-semibold mb-2">Location</h2>
-                    <input
-                        v-model="location"
-                        type="text"
-                        class="w-full mt-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                    />
-                </div>
+        <form @submit.prevent="createEvent" class="space-y-4">
+          <div>
+            <label class="block font-medium mb-1" for="title">Title *</label>
+            <input
+              id="title"
+              v-model="eventTitle"
+              type="text"
+              class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              required
+            />
+          </div>
 
-                <div class="flex flex-row space-x-3 w-full">
-                    <div class="w-full">
-                        <label class="block text-sm font-medium text-gray-700">Date</label>
-                        <input
-                            v-model="date"
-                            type="date"
-                            class="w-full mt-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                        />
-                    </div>
+          <div>
+            <label class="block font-medium mb-1" for="description">Description *</label>
+            <textarea
+              id="description"
+              v-model="eventDesc"
+              rows="3"
+              class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              required
+            ></textarea>
+          </div>
 
-                    <div class="w-full">
-                        <label class="block text-sm font-medium text-gray-700">Time</label>
-                        <input
-                            v-model="time"
-                            type="time"
-                            class="w-full mt-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                        />
-                    </div>
-                </div>
+          <div>
+            <label class="block font-medium mb-1" for="location">Location</label>
+            <input
+              id="location"
+              v-model="eventLocation"
+              type="text"
+              class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
 
-                <button
-                        v-if="!isSubmitting"
-                        @click="addEvent"
-                        type="button"
-                        class="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                    >
-                        Create Event
-                    </button>
-                    <button
-                        v-if="isSubmitting"
-                        type="button"
-                        class="animate-pulse group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-400 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                    >
-                        Creating Event...
-                    </button>
-            </form>
-        </div>
+          <div class="flex-1">
+              <label class="block font-medium mb-1" for="date">Date *</label>
+              <input
+                id="date"
+                v-model="eventDate"
+                type="date"
+                class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                required
+              />
+            </div>
+
+          <div class="flex space-x-4">
+            <div class="flex-1">
+              <label class="block font-medium mb-1" for="time"> Start Time *</label>
+              <input
+                id="time"
+                v-model="eventStartTime"
+                type="time"
+                class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                required
+              />
+            </div>
+            <div class="flex-1">
+              <label class="block font-medium mb-1" for="time"> End Time *</label>
+              <input
+                id="time"
+                v-model="eventEndTime"
+                type="time"
+                class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                required
+              />
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            :disabled="isSubmitting"
+            class="w-full bg-indigo-600 text-white py-2 rounded-md hover:bg-indigo-700 disabled:bg-indigo-400"
+          >
+            {{ isSubmitting ? 'Creating...' : 'Create Event' }}
+          </button>
+        </form>
+      </div>
     </div>
+  </div>
 </template>
